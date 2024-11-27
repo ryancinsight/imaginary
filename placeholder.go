@@ -1,9 +1,9 @@
 package main
 
 import (
-    "encoding/base64"
-    "io"
-    "strings"
+	"encoding/base64"
+	"io"
+	"strings"
 )
 
 // Encoded placeholder image data (1200x1200 JPEG)

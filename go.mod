@@ -7,5 +7,6 @@ require (
 	github.com/h2non/filetype v1.1.3
 	github.com/hashicorp/golang-lru v1.0.2 // indirect
 	github.com/rs/cors v1.11.1
+	github.com/ryancinsight/bimg v0.0.0-20241127162439-16cb8444574f
 	github.com/throttled/throttled/v2 v2.12.0
 )
