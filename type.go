@@ -2,7 +2,7 @@ package main
 
 import (
     "strings"
-    "github.com/h2non/bimg"
+    "imaginary/bimg"
 )
 
 func ExtractImageTypeFromMime(mime string) string {

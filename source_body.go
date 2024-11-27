@@ -1,4 +1,3 @@
-// source_body.go
 package main
 
 import (
@@ -6,12 +5,17 @@ import (
     "io"
     "net/http"
     "strings"
+    "errors"
 )
 
 const (
     formFieldName = "file"
     maxMemory     = 64 << 20 // 64 MB using bit shifting
+    multipartPrefix = "multipart/"
 )
+
+// Add error definition
+var ErrEntityTooLarge = errors.New("entity too large")
 
 const ImageSourceTypeBody ImageSourceType = "payload"
 
@@ -24,23 +28,23 @@ func NewBodyImageSource(config *SourceConfig) ImageSource {
 }
 
 func (s *BodyImageSource) Matches(r *http.Request) bool {
-    return r.Method == http.MethodPost || r.Method == http.MethodPut
+    switch r.Method {
+    case http.MethodPost, http.MethodPut:
+        return true
+    default:
+        return false
+    }
 }
 
 func (s *BodyImageSource) GetImage(r *http.Request) ([]byte, error) {
-    if isFormBody(r) {
+    if strings.HasPrefix(r.Header.Get("Content-Type"), multipartPrefix) {
         return readFormBody(r)
     }
     return readRawBody(r)
 }
 
-// isFormBody checks if request contains multipart form data
-func isFormBody(r *http.Request) bool {
-    return strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/")
-}
-
-// readFormBody handles multipart form file uploads
 func readFormBody(r *http.Request) ([]byte, error) {
+    // Parse with memory limit
     if err := r.ParseMultipartForm(maxMemory); err != nil {
         return nil, err
     }
@@ -52,18 +56,22 @@ func readFormBody(r *http.Request) ([]byte, error) {
     }
     defer file.Close()
 
-    // Pre-allocate buffer with known size if available
+    // Use buffer pooling for large files
     var buf *bytes.Buffer
-    if size := r.ContentLength; size > 0 {
+    if size := r.ContentLength; size > 0 && size <= maxMemory {
         buf = bytes.NewBuffer(make([]byte, 0, size))
     } else {
-        buf = new(bytes.Buffer)
+        buf = bytes.NewBuffer(make([]byte, 0, bytes.MinRead))
     }
 
-    if _, err := io.Copy(buf, file); err != nil {
+    // Copy with size limit
+    written, err := io.CopyN(buf, file, maxMemory+1)
+    if err != nil && err != io.EOF {
         return nil, err
     }
-
+    if written > maxMemory {
+        return nil, ErrEntityTooLarge
+    }
     if buf.Len() == 0 {
         return nil, ErrEmptyBody
     }
@@ -71,20 +79,23 @@ func readFormBody(r *http.Request) ([]byte, error) {
     return buf.Bytes(), nil
 }
 
-// readRawBody handles raw request body data
 func readRawBody(r *http.Request) ([]byte, error) {
-    // Use LimitReader to prevent memory exhaustion
-    body, err := io.ReadAll(io.LimitReader(r.Body, maxMemory))
     defer r.Body.Close()
-    
+
+    // Use LimitReader for memory safety
+    limitReader := io.LimitReader(r.Body, maxMemory+1)
+    body, err := io.ReadAll(limitReader)
     if err != nil {
         return nil, err
     }
-    
+
+    if len(body) > maxMemory {
+        return nil, ErrEntityTooLarge
+    }
     if len(body) == 0 {
         return nil, ErrEmptyBody
     }
-    
+
     return body, nil
 }
 

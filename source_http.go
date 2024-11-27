@@ -1,4 +1,3 @@
-// source_http.go
 package main
 
 import (
@@ -13,7 +12,8 @@ import (
 
 const (
     ImageSourceTypeHTTP ImageSourceType = "http"
-    URLQueryKey = "url"
+    URLQueryKey        = "url"
+    defaultTimeout     = 60 * time.Second
 )
 
 type HTTPImageSource struct {
@@ -25,7 +25,14 @@ func NewHTTPImageSource(config *SourceConfig) ImageSource {
     return &HTTPImageSource{
         Config: config,
         client: &http.Client{
-            Timeout: 60 * time.Second,
+            Timeout: defaultTimeout,
+            Transport: &http.Transport{
+                MaxIdleConns:        100,
+                IdleConnTimeout:     90 * time.Second,
+                DisableCompression:  true,
+                MaxConnsPerHost:     10,
+                DisableKeepAlives:   false,
+            },
         },
     }
 }
@@ -52,15 +59,17 @@ func (s *HTTPImageSource) shouldRestrictOrigin(url *url.URL) bool {
         return false
     }
 
+    urlPath := url.Path
+    urlHost := url.Host
     for _, origin := range s.Config.AllowedOrigins {
-        if origin.Host == url.Host && strings.HasPrefix(url.Path, origin.Path) {
+        if origin.Host == urlHost && strings.HasPrefix(urlPath, origin.Path) {
             return false
         }
 
         if strings.HasPrefix(origin.Host, "*.") {
             suffix := origin.Host[1:]
-            if (url.Host == origin.Host[2:] || strings.HasSuffix(url.Host, suffix)) && 
-                strings.HasPrefix(url.Path, origin.Path) {
+            if (urlHost == origin.Host[2:] || strings.HasSuffix(urlHost, suffix)) && 
+                strings.HasPrefix(urlPath, origin.Path) {
                 return false
             }
         }
@@ -89,18 +98,10 @@ func (s *HTTPImageSource) fetchImage(url *url.URL, ireq *http.Request) ([]byte, 
             res.StatusCode, req.URL.String()), res.StatusCode)
     }
 
-    // Pre-allocate buffer with response content length if available
-    var buf []byte
-    if res.ContentLength > 0 {
-        buf = make([]byte, 0, res.ContentLength)
-    }
-    buf, err = io.ReadAll(res.Body)
-    if err != nil {
-        return nil, fmt.Errorf("unable to read image from response: %w", err)
-    }
-    
-    return buf, nil
+    // Use io.ReadAll directly since we don't need the pre-allocated buffer
+    return io.ReadAll(io.LimitReader(res.Body, int64(s.Config.MaxAllowedSize)))
 }
+
 
 func (s *HTTPImageSource) checkImageSize(ctx context.Context, url *url.URL, ireq *http.Request) error {
     req := s.newRequest(ctx, http.MethodHead, url, ireq)
@@ -128,35 +129,31 @@ func (s *HTTPImageSource) newRequest(ctx context.Context, method string, url *ur
     req.Header.Set("User-Agent", "imaginary/"+Version)
     req.URL = url
 
-    if len(s.Config.ForwardHeaders) > 0 {
-        s.setForwardHeaders(req, ireq)
-    }
-
     if s.Config.AuthForwarding || s.Config.Authorization != "" {
         s.setAuthorizationHeader(req, ireq)
+    }
+
+    if len(s.Config.ForwardHeaders) > 0 {
+        s.setForwardHeaders(req, ireq)
     }
 
     return req
 }
 
 func (s *HTTPImageSource) setAuthorizationHeader(req, ireq *http.Request) {
-    if auth := s.Config.Authorization; auth != "" {
-        req.Header.Set("Authorization", auth)
-        return
-    }
-    
-    if auth := ireq.Header.Get("X-Forward-Authorization"); auth != "" {
-        req.Header.Set("Authorization", auth)
-        return
-    }
-    
-    if auth := ireq.Header.Get("Authorization"); auth != "" {
-        req.Header.Set("Authorization", auth)
+    switch {
+    case s.Config.Authorization != "":
+        req.Header.Set("Authorization", s.Config.Authorization)
+    case ireq.Header.Get("X-Forward-Authorization") != "":
+        req.Header.Set("Authorization", ireq.Header.Get("X-Forward-Authorization"))
+    case ireq.Header.Get("Authorization") != "":
+        req.Header.Set("Authorization", ireq.Header.Get("Authorization"))
     }
 }
 
 func (s *HTTPImageSource) setForwardHeaders(req, ireq *http.Request) {
-    for _, header := range s.Config.ForwardHeaders {
+    headers := s.Config.ForwardHeaders
+    for _, header := range headers {
         if value := ireq.Header.Get(header); value != "" {
             req.Header.Set(header, value)
         }
