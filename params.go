@@ -1,125 +1,106 @@
 package main
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
-	"math"
-	"net/url"
-	"strconv"
-	"strings"
-
-	"github.com/h2non/bimg"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "math"
+    "net/url"
+    "strconv"
+    "strings"
+    "github.com/h2non/bimg"
 )
 
 var ErrUnsupportedValue = errors.New("unsupported value")
 
-// Coercion is the type that type coerces a parameter and defines the appropriate field on ImageOptions
+// Coercion defines type coercion function signature
 type Coercion func(*ImageOptions, interface{}) error
 
+// Map of parameter names to their coercion functions
 var paramTypeCoercions = map[string]Coercion{
-	"width":       coerceWidth,
-	"height":      coerceHeight,
-	"quality":     coerceQuality,
-	"top":         coerceTop,
-	"left":        coerceLeft,
-	"areawidth":   coerceAreaWidth,
-	"areaheight":  coerceAreaHeight,
-	"compression": coerceCompression,
-	"rotate":      coerceRotate,
-	"margin":      coerceMargin,
-	"factor":      coerceFactor,
-	"dpi":         coerceDPI,
-	"textwidth":   coerceTextWidth,
-	"opacity":     coerceOpacity,
-	"flip":        coerceFlip,
-	"flop":        coerceFlop,
-	"nocrop":      coerceNoCrop,
-	"noprofile":   coerceNoProfile,
-	"norotation":  coerceNoRotation,
-	"noreplicate": coerceNoReplicate,
-	"force":       coerceForce,
-	"embed":       coerceEmbed,
-	"stripmeta":   coerceStripMeta,
-	"text":        coerceText,
-	"image":       coerceImage,
-	"font":        coerceFont,
-	"type":        coerceImageType,
-	"color":       coerceColor,
-	"colorspace":  coerceColorSpace,
-	"gravity":     coerceGravity,
-	"background":  coerceBackground,
-	"extend":      coerceExtend,
-	"sigma":       coerceSigma,
-	"minampl":     coerceMinAmpl,
-	"operations":  coerceOperations,
-	"interlace":   coerceInterlace,
-	"aspectratio": coerceAspectRatio,
-	"palette":     coercePalette,
-	"speed":       coerceSpeed,
+    "width": coerceWidth,
+    "height": coerceHeight,
+    "quality": coerceQuality,
+    "top": coerceTop,
+    "left": coerceLeft,
+    "areawidth": coerceAreaWidth,
+    "areaheight": coerceAreaHeight,
+    "compression": coerceCompression,
+    "rotate": coerceRotate,
+    "margin": coerceMargin,
+    "factor": coerceFactor,
+    "dpi": coerceDPI,
+    "textwidth": coerceTextWidth,
+    "opacity": coerceOpacity,
+    "flip": coerceFlip,
+    "flop": coerceFlop,
+    "nocrop": coerceNoCrop,
+    "noprofile": coerceNoProfile,
+    "norotation": coerceNoRotation,
+    "noreplicate": coerceNoReplicate,
+    "force": coerceForce,
+    "embed": coerceEmbed,
+    "stripmeta": coerceStripMeta,
+    "text": coerceText,
+    "image": coerceImage,
+    "font": coerceFont,
+    "type": coerceImageType,
+    "color": coerceColor,
+    "colorspace": coerceColorSpace,
+    "gravity": coerceGravity,
+    "background": coerceBackground,
+    "extend": coerceExtend,
+    "sigma": coerceSigma,
+    "minampl": coerceMinAmpl,
+    "operations": coerceOperations,
+    "interlace": coerceInterlace,
+    "aspectratio": coerceAspectRatio,
+    "palette": coercePalette,
+    "speed": coerceSpeed,
 }
 
+// Type coercion helper functions
 func coerceTypeInt(param interface{}) (int, error) {
-	if v, ok := param.(int); ok {
-		return v, nil
-	}
-
-	if v, ok := param.(float64); ok {
-		return int(v), nil
-	}
-
-	if v, ok := param.(string); ok {
-		return parseInt(v)
-	}
-
-	return 0, ErrUnsupportedValue
+    switch v := param.(type) {
+    case int:
+        return v, nil
+    case float64:
+        return int(v), nil
+    case string:
+        return parseInt(v)
+    }
+    return 0, ErrUnsupportedValue
 }
 
 func coerceTypeFloat(param interface{}) (float64, error) {
-	if v, ok := param.(float64); ok {
-		return v, nil
-	}
-
-	if v, ok := param.(int); ok {
-		return float64(v), nil
-	}
-
-	if v, ok := param.(string); ok {
-		result, err := parseFloat(v)
-		if err != nil {
-			return 0, ErrUnsupportedValue
-		}
-
-		return result, nil
-	}
-
-	return 0, ErrUnsupportedValue
+    switch v := param.(type) {
+    case float64:
+        return v, nil
+    case int:
+        return float64(v), nil
+    case string:
+        return parseFloat(v)
+    }
+    return 0, ErrUnsupportedValue
 }
 
 func coerceTypeBool(param interface{}) (bool, error) {
-	if v, ok := param.(bool); ok {
-		return v, nil
-	}
-
-	if v, ok := param.(string); ok {
-		result, err := parseBool(v)
-		if err != nil {
-			return false, ErrUnsupportedValue
-		}
-
-		return result, nil
-	}
-
-	return false, ErrUnsupportedValue
+    switch v := param.(type) {
+    case bool:
+        return v, nil
+    case string:
+        return parseBool(v)
+    }
+    return false, ErrUnsupportedValue
 }
 
 func coerceTypeString(param interface{}) (string, error) {
-	if v, ok := param.(string); ok {
-		return v, nil
-	}
-
-	return "", ErrUnsupportedValue
+    if v, ok := param.(string); ok {
+        return v, nil
+    }
+    return "", ErrUnsupportedValue
 }
+
 
 func coerceHeight(io *ImageOptions, param interface{}) (err error) {
 	io.Height, err = coerceTypeInt(param)
@@ -356,144 +337,118 @@ func coerceSpeed(io *ImageOptions, param interface{}) (err error) {
 	return err
 }
 
+// Parameter coercion functions
 func buildParamsFromOperation(op PipelineOperation) (ImageOptions, error) {
-	var options ImageOptions
+    var options ImageOptions
+    options.Extend = bimg.ExtendCopy
 
-	// Apply defaults
-	options.Extend = bimg.ExtendCopy
-
-	for key, value := range op.Params {
-		fn, ok := paramTypeCoercions[key]
-		if !ok {
-			continue
-		}
-
-		err := fn(&options, value)
-		if err != nil {
-			return ImageOptions{}, fmt.Errorf(`error while processing parameter "%s" with value %q, error: %s`, key, value, err)
-		}
-	}
-
-	return options, nil
+    for key, value := range op.Params {
+        if fn, ok := paramTypeCoercions[key]; ok {
+            if err := fn(&options, value); err != nil {
+                return ImageOptions{}, fmt.Errorf("error processing parameter %q with value %v: %w", key, value, err)
+            }
+        }
+    }
+    return options, nil
 }
 
-// buildParamsFromQuery builds the ImageOptions type from untyped parameters
 func buildParamsFromQuery(query url.Values) (ImageOptions, error) {
-	var options ImageOptions
+    var options ImageOptions
+    options.Extend = bimg.ExtendCopy
 
-	// Apply defaults
-	options.Extend = bimg.ExtendCopy
-
-	// Extract only known parameters
-	for key := range query {
-		fn, ok := paramTypeCoercions[key]
-		if !ok {
-			continue
-		}
-
-		value := query.Get(key)
-		err := fn(&options, value)
-		if err != nil {
-			return ImageOptions{}, fmt.Errorf(`error while processing parameter "%s" with value %q, error: %s`, key, value, err)
-		}
-	}
-
-	return options, nil
+    for key := range query {
+        if fn, ok := paramTypeCoercions[key]; ok {
+            if err := fn(&options, query.Get(key)); err != nil {
+                return ImageOptions{}, fmt.Errorf("error processing parameter %q with value %q: %w", key, query.Get(key), err)
+            }
+        }
+    }
+    return options, nil
 }
 
+// Helper functions for parsing values
 func parseBool(val string) (bool, error) {
-	if val == "" {
-		return false, nil
-	}
-
-	return strconv.ParseBool(val)
+    if val == "" {
+        return false, nil
+    }
+    return strconv.ParseBool(val)
 }
 
 func parseInt(param string) (int, error) {
-	if param == "" {
-		return 0, nil
-	}
-
-	f, err := parseFloat(param)
-	return int(math.Floor(f + 0.5)), err
+    if param == "" {
+        return 0, nil
+    }
+    f, err := parseFloat(param)
+    return int(math.Floor(f + 0.5)), err
 }
 
 func parseFloat(param string) (float64, error) {
-	if param == "" {
-		return 0.0, nil
-	}
-
-	val, err := strconv.ParseFloat(param, 64)
-	return math.Abs(val), err
+    if param == "" {
+        return 0.0, nil
+    }
+    val, err := strconv.ParseFloat(param, 64)
+    return math.Abs(val), err
 }
 
 func parseColorspace(val string) bimg.Interpretation {
-	if val == "bw" {
-		return bimg.InterpretationBW
-	}
-	return bimg.InterpretationSRGB
+    if val == "bw" {
+        return bimg.InterpretationBW
+    }
+    return bimg.InterpretationSRGB
 }
 
 func parseColor(val string) []uint8 {
-	const max float64 = 255
-	var buf []uint8
-	if val != "" {
-		for _, num := range strings.Split(val, ",") {
-			n, _ := strconv.ParseUint(strings.Trim(num, " "), 10, 8)
-			buf = append(buf, uint8(math.Min(float64(n), max)))
-		}
-	}
-	return buf
+    const max float64 = 255
+    var buf []uint8
+    if val != "" {
+        for _, num := range strings.Split(val, ",") {
+            n, _ := strconv.ParseUint(strings.TrimSpace(num), 10, 8)
+            buf = append(buf, uint8(math.Min(float64(n), max)))
+        }
+    }
+    return buf
 }
 
 func parseJSONOperations(data string) (PipelineOperations, error) {
-	var operations PipelineOperations
-
-	// Fewer than 2 characters cannot be valid JSON. We assume empty operation.
-	if len(data) < 2 {
-		return operations, nil
-	}
-
-	d := json.NewDecoder(strings.NewReader(data))
-	d.DisallowUnknownFields()
-
-	err := d.Decode(&operations)
-	return operations, err
+    var operations PipelineOperations
+    if len(data) < 2 {
+        return operations, nil
+    }
+    d := json.NewDecoder(strings.NewReader(data))
+    d.DisallowUnknownFields()
+    return operations, d.Decode(&operations)
 }
 
 func parseExtendMode(val string) bimg.Extend {
-	val = strings.TrimSpace(strings.ToLower(val))
-	if val == "white" {
-		return bimg.ExtendWhite
-	}
-	if val == "black" {
-		return bimg.ExtendBlack
-	}
-	if val == "copy" {
-		return bimg.ExtendCopy
-	}
-	if val == "background" {
-		return bimg.ExtendBackground
-	}
-	if val == "lastpixel" {
-		return bimg.ExtendLast
-	}
-	return bimg.ExtendMirror
+    val = strings.TrimSpace(strings.ToLower(val))
+    switch val {
+    case "white":
+        return bimg.ExtendWhite
+    case "black":
+        return bimg.ExtendBlack
+    case "copy":
+        return bimg.ExtendCopy
+    case "background":
+        return bimg.ExtendBackground
+    case "lastpixel":
+        return bimg.ExtendLast
+    default:
+        return bimg.ExtendMirror
+    }
 }
 
 func parseGravity(val string) bimg.Gravity {
-	var m = map[string]bimg.Gravity{
-		"south": bimg.GravitySouth,
-		"north": bimg.GravityNorth,
-		"east":  bimg.GravityEast,
-		"west":  bimg.GravityWest,
-		"smart": bimg.GravitySmart,
-	}
-
-	val = strings.TrimSpace(strings.ToLower(val))
-	if g, ok := m[val]; ok {
-		return g
-	}
-
-	return bimg.GravityCentre
+    gravityMap := map[string]bimg.Gravity{
+        "south": bimg.GravitySouth,
+        "north": bimg.GravityNorth,
+        "east":  bimg.GravityEast,
+        "west":  bimg.GravityWest,
+        "smart": bimg.GravitySmart,
+    }
+    
+    val = strings.TrimSpace(strings.ToLower(val))
+    if g, ok := gravityMap[val]; ok {
+        return g
+    }
+    return bimg.GravityCentre
 }
