@@ -1,140 +1,175 @@
+// server.go
 package main
 
 import (
-	"context"
-	"log"
-	"net/http"
-	"net/url"
-	"os"
-	"os/signal"
-	"path"
-	"strconv"
-	"strings"
-	"syscall"
-	"time"
+    "crypto/tls"
+    "context"
+    "log"
+    "net/http"
+    "net/url"
+    "os"
+    "os/signal"
+    "path"
+    "strconv"
+    "strings"
+    "syscall"
+    "time"
 )
 
+// ServerOptions defines configuration options for the HTTP server
 type ServerOptions struct {
-	Port               int
-	Burst              int
-	Concurrency        int
-	HTTPCacheTTL       int
-	HTTPReadTimeout    int
-	HTTPWriteTimeout   int
-	MaxAllowedSize     int
-	MaxAllowedPixels   float64
-	CORS               bool
-	Gzip               bool // deprecated
-	AuthForwarding     bool
-	EnableURLSource    bool
-	EnablePlaceholder  bool
-	EnableURLSignature bool
-	URLSignatureKey    string
-	Address            string
-	PathPrefix         string
-	APIKey             string
-	Mount              string
-	CertFile           string
-	KeyFile            string
-	Authorization      string
-	Placeholder        string
-	PlaceholderStatus  int
-	ForwardHeaders     []string
-	PlaceholderImage   []byte
-	Endpoints          Endpoints
-	AllowedOrigins     []*url.URL
-	LogLevel           string
-	ReturnSize         bool
+    Port               int
+    Burst              int
+    Concurrency        int
+    HTTPCacheTTL       int
+    HTTPReadTimeout    int
+    HTTPWriteTimeout   int
+    MaxAllowedSize     int
+    MaxAllowedPixels   float64
+    CORS               bool
+    Gzip               bool
+    AuthForwarding     bool
+    EnableURLSource    bool
+    EnablePlaceholder  bool
+    EnableURLSignature bool
+    URLSignatureKey    string
+    Address            string
+    PathPrefix         string
+    APIKey             string
+    Mount              string
+    CertFile          string
+    KeyFile           string
+    Authorization     string
+    Placeholder       string
+    PlaceholderStatus int
+    ForwardHeaders    []string
+    PlaceholderImage  []byte
+    Endpoints         Endpoints
+    AllowedOrigins    []*url.URL
+    LogLevel          string
+    ReturnSize        bool
 }
 
-// Endpoints represents a list of endpoint names to disable.
+// Endpoints represents a list of API endpoints
 type Endpoints []string
 
-// IsValid validates if a given HTTP request endpoint is valid or not.
+// IsValid checks if the request endpoint is allowed
 func (e Endpoints) IsValid(r *http.Request) bool {
-	parts := strings.Split(r.URL.Path, "/")
-	endpoint := parts[len(parts)-1]
-	for _, name := range e {
-		if endpoint == name {
-			return false
-		}
-	}
-	return true
+    parts := strings.Split(r.URL.Path, "/")
+    endpoint := parts[len(parts)-1]
+    for _, name := range e {
+        if endpoint == name {
+            return false
+        }
+    }
+    return true
 }
 
-func Server(o ServerOptions) {
-	addr := o.Address + ":" + strconv.Itoa(o.Port)
-	handler := NewLog(NewServerMux(o), os.Stdout, o.LogLevel)
-
-	server := &http.Server{
-		Addr:           addr,
-		Handler:        handler,
-		MaxHeaderBytes: 1 << 20,
-		ReadTimeout:    time.Duration(o.HTTPReadTimeout) * time.Second,
-		WriteTimeout:   time.Duration(o.HTTPWriteTimeout) * time.Second,
-	}
-
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		if err := listenAndServe(server, o); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %s\n", err)
-		}
-	}()
-
-	<-done
-	log.Print("Graceful shutdown")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer func() {
-		// extra handling here
-		cancel()
-	}()
-
-	if err := server.Shutdown(ctx); err != nil {
-		log.Fatalf("Server Shutdown Failed:%+v", err)
-	}
-}
-
-func listenAndServe(s *http.Server, o ServerOptions) error {
-	if o.CertFile != "" && o.KeyFile != "" {
-		return s.ListenAndServeTLS(o.CertFile, o.KeyFile)
-	}
-	return s.ListenAndServe()
-}
-
-func join(o ServerOptions, route string) string {
-	return path.Join(o.PathPrefix, route)
-}
-
-// NewServerMux creates a new HTTP server route multiplexer.
+// NewServerMux creates and configures the HTTP request multiplexer
 func NewServerMux(o ServerOptions) http.Handler {
-	mux := http.NewServeMux()
+    mux := http.NewServeMux()
+    
+    // Core endpoints
+    mux.Handle(path.Join(o.PathPrefix, "/"), Middleware(indexController(o), o))
+    mux.Handle(path.Join(o.PathPrefix, "/form"), Middleware(formController(o), o))
+    mux.Handle(path.Join(o.PathPrefix, "/health"), Middleware(healthController, o))
 
-	mux.Handle(join(o, "/"), Middleware(indexController(o), o))
-	mux.Handle(join(o, "/form"), Middleware(formController(o), o))
-	mux.Handle(join(o, "/health"), Middleware(healthController, o))
+    // Image processing middleware
+    image := ImageMiddleware(o)
+    
+	// Image operation endpoints
+	endpoints := map[string]ImageOperation{
+		"/resize": Resize,
+		"/fit": Fit,
+		"/enlarge": Enlarge,
+		"/extract": Extract,
+		"/crop": Crop,
+		"/smartcrop": SmartCrop,
+		"/rotate": Rotate,
+		"/autorotate": AutoRotate,
+		"/flip": Flip,
+		"/flop": Flop,
+		"/thumbnail": Thumbnail,
+		"/zoom": Zoom,
+		"/convert": Convert,
+		"/watermark": Watermark,
+		"/watermarkimage": WatermarkImage,
+		"/info": Info,
+		"/blur": GaussianBlur,
+		"/pipeline": Pipeline,
+	}
 
-	image := ImageMiddleware(o)
-	mux.Handle(join(o, "/resize"), image(Resize))
-	mux.Handle(join(o, "/fit"), image(Fit))
-	mux.Handle(join(o, "/enlarge"), image(Enlarge))
-	mux.Handle(join(o, "/extract"), image(Extract))
-	mux.Handle(join(o, "/crop"), image(Crop))
-	mux.Handle(join(o, "/smartcrop"), image(SmartCrop))
-	mux.Handle(join(o, "/rotate"), image(Rotate))
-	mux.Handle(join(o, "/autorotate"), image(AutoRotate))
-	mux.Handle(join(o, "/flip"), image(Flip))
-	mux.Handle(join(o, "/flop"), image(Flop))
-	mux.Handle(join(o, "/thumbnail"), image(Thumbnail))
-	mux.Handle(join(o, "/zoom"), image(Zoom))
-	mux.Handle(join(o, "/convert"), image(Convert))
-	mux.Handle(join(o, "/watermark"), image(Watermark))
-	mux.Handle(join(o, "/watermarkimage"), image(WatermarkImage))
-	mux.Handle(join(o, "/info"), image(Info))
-	mux.Handle(join(o, "/blur"), image(GaussianBlur))
-	mux.Handle(join(o, "/pipeline"), image(Pipeline))
 
-	return mux
+    for route, operation := range endpoints {
+        mux.Handle(path.Join(o.PathPrefix, route), image(operation))
+    }
+
+    return mux
+}
+
+// Server initializes and runs the HTTP server
+func Server(o ServerOptions) {
+    addr := o.Address + ":" + strconv.Itoa(o.Port)
+    
+    // Configure TLS
+    tlsConfig := &tls.Config{
+        MinVersion: tls.VersionTLS12,
+        CurvePreferences: []tls.CurveID{
+            tls.X25519,
+            tls.CurveP256,
+            tls.CurveP384,
+        },
+        PreferServerCipherSuites: true,
+        CipherSuites: []uint16{
+            tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+            tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+            tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+            tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+            tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+        },
+        NextProtos: []string{"h2", "http/1.1"},
+    }
+
+    // Initialize server
+    server := &http.Server{
+        Addr:           addr,
+        Handler:        NewLog(NewServerMux(o), os.Stdout, o.LogLevel),
+        MaxHeaderBytes: 1 << 20,
+        ReadTimeout:    time.Duration(o.HTTPReadTimeout) * time.Second,
+        WriteTimeout:   time.Duration(o.HTTPWriteTimeout) * time.Second,
+        IdleTimeout:    120 * time.Second,
+        TLSConfig:      tlsConfig,
+    }
+
+    // Setup graceful shutdown
+    shutdown := make(chan os.Signal, 1)
+    signal.Notify(shutdown, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+    // Start server
+    go func() {
+        if err := listenAndServe(server, o); err != nil && err != http.ErrServerClosed {
+            log.Fatalf("server error: %v", err)
+        }
+    }()
+
+    // Wait for shutdown signal
+    <-shutdown
+    log.Print("shutting down server")
+
+    // Graceful shutdown with timeout
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    if err := server.Shutdown(ctx); err != nil {
+        log.Fatalf("server shutdown failed: %v", err)
+    }
+}
+
+// listenAndServe starts the server with or without TLS
+func listenAndServe(s *http.Server, o ServerOptions) error {
+    if o.CertFile != "" && o.KeyFile != "" {
+        return s.ListenAndServeTLS(o.CertFile, o.KeyFile)
+    }
+    return s.ListenAndServe()
 }
