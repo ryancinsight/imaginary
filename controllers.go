@@ -4,8 +4,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/h2non/filetype"
 	"github.com/h2non/bimg"
+	"github.com/h2non/filetype"
 	"mime"
 	"net/http"
 	"path"
